@@ -184,7 +184,7 @@ function edit_host_file(){
     #currently chef-client runs bomb without the chef-server in the hosts file?!
     ip=$(ip_for $1)
     chefservername=$2
-    serverip=$(ip_for $servername)
+    serverip=$(ip_for $chefservername)
     ssh ${SSHOPTS} root@$ip "echo '${serverip}  ${chefservername}' >> /etc/hosts"
 }
 
@@ -234,6 +234,12 @@ function assignrole(){
     esac
 }
 
+function set_environ(){
+    server=$1
+    env=$2
+    knife exec -E "nodes.transform('name:${server}') { |n| n.chef_environment('${env}'); n.save}"
+}
+
 function usage(){
 cat <<EOF
 usage: $0 options
@@ -276,6 +282,8 @@ ARGUMENTS:
          Defaults to $PWD
   -a= --assign-role=[ full ]
          Assign role
+  -e= --environment=<Environment Name>
+         Specify the environment, defaults to test
 EOF
 }
 
@@ -315,6 +323,7 @@ server_count=1
 role=""
 download_location="$PWD/chef-cookbooks"
 cookbook_location="${PWD}/cookbooks"
+environment="test"
 FULL_RUNLIST='role[single-controller],role[single-compute],role[collectd-server],role[collectd-client],role[graphite],recipe[exerstack]'
 ####################
 
@@ -443,6 +452,11 @@ for arg in $@; do
                 exit 1
             fi
             ;;
+        "--environment" | "-e")
+            if [ "$value" != "--environment" ] && [ "$value" != "-e" ]; then
+                environment=$value
+            fi
+            ;;
         "--help" | "-h")
             usage
             exit 0
@@ -476,8 +490,9 @@ if ( $new_server ); then
         TEMP_NAME=$INST_NAME$client
         wait_for_server $TEMP_NAME
         steal_swap_for_swift_cinder $TEMP_NAME
-        edit_host_file $chef_server
+        edit_host_file $TEMP_NAME $chef_server
         client_setup $TEMP_NAME
+        set_environ $TEMP_NAME $environment
     done
 elif ( $client_run ); then
     clientrun $INST_NAME
