@@ -188,9 +188,16 @@ function clientdelete(){
     server=$1
     nova_uuid=""
     knife node delete -y $server
+    knife client delete -y $server
     echo "Deleting ${server}"
     uuid=$($NOVA list | grep ${server} | awk '{print $2}' | head -1)
     $NOVA delete ${uuid}
+}
+
+function reindex_server(){
+    server=$1
+    ip=$(ip_for $server)
+    ssh ${SSHOPTS} root@$ip "chef-server-ctl reindex"
 }
 
 function usage(){
@@ -208,7 +215,8 @@ ARGUMENTS:
   -c= --client-name=<Client Name>
          Name for the instance to be spun up
   -s= --server=<Server Name>
-         Specify the name of the Chef Server to associate the client with 
+         Specify the name of the Chef Server to reindex
+         If no value is specified will assume "chef-server"
   -n= --network=<Existing network name>|<Existing network uuid>
          Setup a private cloud networks, will require "nova network-create" command
          You can specify an existing network name or network uuid
@@ -255,6 +263,7 @@ chef_server="chef-server"
 new_server=true
 client_run=false
 client_delete=false
+reindex=false
 server_count=1
 ####################
 
@@ -291,10 +300,11 @@ for arg in $@; do
         "--server" | "-s")
             if [ "$value" != "--server" ] && [ "$value" != "-s" ]; then
                 chef_server=$value
+                reindex=true
+                new_server=false
             else
-                echo "Please Specify server name"
-                usage
-                exit 1
+                reindex=true
+                new_server=false
             fi
             ;;
         "--run" | "-r")
@@ -379,5 +389,7 @@ elif ( $client_run ); then
     clientrun $INST_NAME
 elif ( $client_delete ); then
     clientdelete $INST_NAME
+elif ( $reindex); then
+    reindex_server $chef_server
 fi
 exit
