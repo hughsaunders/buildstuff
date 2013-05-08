@@ -200,6 +200,11 @@ function reindex_server(){
     ssh ${SSHOPTS} root@$ip "chef-server-ctl reindex"
 }
 
+function upload_cookbooks(){
+    cookbook_path=$1
+    knife cookbook upload -a -o $1
+}
+
 function usage(){
 cat <<EOF
 usage: $0 options
@@ -215,8 +220,8 @@ ARGUMENTS:
   -c= --client-name=<Client Name>
          Name for the instance to be spun up
   -s= --server=<Server Name>
-         Specify the name of the Chef Server to reindex
-         If no value is specified will assume "chef-server"
+         Specify the name of the Chef Server - default "chef-server"
+         Used with re-index
   -n= --network=<Existing network name>|<Existing network uuid>
          Setup a private cloud networks, will require "nova network-create" command
          You can specify an existing network name or network uuid
@@ -232,6 +237,11 @@ ARGUMENTS:
          Specify the flavor of the instance, by size - default "4GB"
   -sc= --server-count=<Number of servers>
          Will create specified number of servers named <client name><number>
+  -ri --reindex
+         Run a re-index on the chef-server specified by "-s"
+  -u= --upload=<Path to cookbooks>
+         Upload cookbooks in specified Path
+         Defaults to $PWD/cookbooks
 EOF
 }
 
@@ -264,7 +274,9 @@ new_server=true
 client_run=false
 client_delete=false
 reindex=false
+upload=false
 server_count=1
+cookbook_location="${PWD}/cookbooks"
 ####################
 
 ####################
@@ -300,11 +312,10 @@ for arg in $@; do
         "--server" | "-s")
             if [ "$value" != "--server" ] && [ "$value" != "-s" ]; then
                 chef_server=$value
-                reindex=true
-                new_server=false
             else
-                reindex=true
-                new_server=false
+                echo "Please specify chef-server name"
+                usage
+                exit 1
             fi
             ;;
         "--run" | "-r")
@@ -350,6 +361,23 @@ for arg in $@; do
                 exit 1
             fi
             ;;
+        "--reindex" | "-ri")
+            reindex=true
+            new_server=false
+            ;;
+        "--upload" | "-u")
+            new_server=false
+            upload=true
+            if [ "$value" != "--upload" ] && [ "$value" != "-u" ]; then
+                if [ ${value:0:1} == "/" ]; then
+                    cookbook_location=$value
+                elif [ ${value:0:1} == "~" ]; then
+                    cookbook_location="$HOME""${value:1}"
+                else
+                    cookbook_location="$PWD""/""$value"
+                fi
+            fi
+            ;;
         "--help" | "-h")
             usage
             exit 0
@@ -389,7 +417,9 @@ elif ( $client_run ); then
     clientrun $INST_NAME
 elif ( $client_delete ); then
     clientdelete $INST_NAME
-elif ( $reindex); then
+elif ( $reindex ); then
     reindex_server $chef_server
+elif ( $upload ); then
+    upload_cookbooks $cookbook_location
 fi
 exit
