@@ -205,6 +205,11 @@ function upload_cookbooks(){
     knife cookbook upload -a -o $1
 }
 
+function download_cookbooks(){
+    download_path=$1
+    git clone --recursive http://github.com/rcbops/chef-cookbooks $1
+}
+
 function usage(){
 cat <<EOF
 usage: $0 options
@@ -242,6 +247,9 @@ ARGUMENTS:
   -u= --upload=<Path to cookbooks>
          Upload cookbooks in specified Path
          Defaults to $PWD/cookbooks
+  -dl= --download=<Path to download>
+         Download cookbooks from the rcbops repo and upload them
+         Defaults to $PWD
 EOF
 }
 
@@ -275,7 +283,9 @@ client_run=false
 client_delete=false
 reindex=false
 upload=false
+download=false
 server_count=1
+download_location="$PWD/chef-cookbooks"
 cookbook_location="${PWD}/cookbooks"
 ####################
 
@@ -378,6 +388,20 @@ for arg in $@; do
                 fi
             fi
             ;;
+        "--download" | "-dl")
+            download=true
+            new_server=false
+            if [ "$value" != "--download" ] && [ "$value" != "-d" ]; then
+                if [ ${value:0:1} == "/" ]; then
+                    download_location=$value
+                elif [ ${value:0:1} == "~" ]; then
+                    download_location="$HOME""${value:1}"
+                else
+                    download_location="$PWD""/""$value"
+                fi
+                download_location="$download_location/chef-cookbooks"
+            fi
+            ;;
         "--help" | "-h")
             usage
             exit 0
@@ -421,5 +445,8 @@ elif ( $reindex ); then
     reindex_server $chef_server
 elif ( $upload ); then
     upload_cookbooks $cookbook_location
+elif ( $download ); then
+    download_cookbooks $download_location
+    upload_cookbooks "$download_location/cookbooks/"
 fi
 exit
