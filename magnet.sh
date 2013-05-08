@@ -207,7 +207,7 @@ function upload_cookbooks(){
 
 function download_cookbooks(){
     download_path=$1
-    git clone --recursive http://github.com/rcbops/chef-cookbooks $1
+    git clone --recursive -b sprint http://github.com/rcbops/chef-cookbooks $1
 }
 
 function usage(){
