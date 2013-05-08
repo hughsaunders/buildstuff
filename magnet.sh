@@ -175,13 +175,26 @@ function check_network(){
     fi
 }
 
+function setup_roles(){
+    role_location="$1/roles/*.rb"
+    knife role from file $role_location
+}
+
+function edit_host_file(){
+    #currently chef-client runs bomb without the chef-server in the hosts file?!
+    ip=$(ip_for $1)
+    chefservername=$2
+    serverip=$(ip_for $servername)
+    ssh ${SSHOPTS} root@$ip "echo '${serverip}  ${chefservername}' >> /etc/hosts"
+}
+
 function clientrun(){
     server=$1
     ip=$(ip_for $server)
     if [ ${OS} = "redhat" ]; then
         ssh ${SSHOPTS} root@$ip "sed -i -e '/Defaults.*requiretty/s/^/#/g' /etc/sudoers"
     fi
-    ssh ${SSHOPTS} root@$ip "chef-client"
+    ssh ${SSHOPTS} root@$ip "chef-client -c /etc/chef/client.rb"
 }
 
 function clientdelete(){
@@ -208,6 +221,17 @@ function upload_cookbooks(){
 function download_cookbooks(){
     download_path=$1
     git clone --recursive -b sprint http://github.com/rcbops/chef-cookbooks $1
+}
+
+function assignrole(){
+    server=$1
+    serverrole=$2
+    case $serverrole in
+      "full")
+          knife node run_list add ${server} ${FULL_RUNLIST}
+          clientrun $server
+          ;;
+    esac
 }
 
 function usage(){
@@ -250,6 +274,8 @@ ARGUMENTS:
   -dl= --download=<Path to download>
          Download cookbooks from the rcbops repo and upload them
          Defaults to $PWD
+  -a= --assign-role=[ full ]
+         Assign role
 EOF
 }
 
@@ -272,6 +298,7 @@ fi
 
 ####################
 #  Flag Variables  #
+knife_config_file="-c ~/.chef/knife.rb"
 NET_ID="chef-net"
 IMAGE_TYPE=${IMAGE_TYPE:-"12.04 LTS"}
 OS="ubuntu"
@@ -285,8 +312,10 @@ reindex=false
 upload=false
 download=false
 server_count=1
+role=""
 download_location="$PWD/chef-cookbooks"
 cookbook_location="${PWD}/cookbooks"
+FULL_RUNLIST='role[single-controller],role[single-compute],role[collectd-server],role[collectd-client],role[graphite],recipe[exerstack]'
 ####################
 
 ####################
@@ -402,6 +431,18 @@ for arg in $@; do
                 download_location="$download_location/chef-cookbooks"
             fi
             ;;
+        "--assign" | "-a")
+            new_server=false
+            assign_role=true
+            value=$(echo $value | tr "[:upper:]" "[:lower:]")
+            if [ "$value" == "full" ]; then
+                role=$value
+            else
+                echo "Please specify suitable role"
+                usage
+                exit 1
+            fi
+            ;;
         "--help" | "-h")
             usage
             exit 0
@@ -435,18 +476,26 @@ if ( $new_server ); then
         TEMP_NAME=$INST_NAME$client
         wait_for_server $TEMP_NAME
         steal_swap_for_swift_cinder $TEMP_NAME
+        edit_host_file $chef_server
         client_setup $TEMP_NAME
     done
 elif ( $client_run ); then
     clientrun $INST_NAME
 elif ( $client_delete ); then
-    clientdelete $INST_NAME
+    for client in $(seq 1 $server_count); do
+        TEMP_NAME=$INST_NAME$client
+        clientdelete $TEMP_NAME
+    done
 elif ( $reindex ); then
     reindex_server $chef_server
 elif ( $upload ); then
     upload_cookbooks $cookbook_location
+    setup_roles "$cookbook_location/../"
 elif ( $download ); then
     download_cookbooks $download_location
     upload_cookbooks "$download_location/cookbooks/"
+    setup_roles $download_location
+elif ( $assign_role ); then
+    assignrole $INST_NAME $role
 fi
 exit
