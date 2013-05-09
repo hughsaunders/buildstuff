@@ -343,6 +343,7 @@ client_delete=false
 reindex=false
 upload=false
 download=false
+assign_role=false
 server_count=1
 verbose_string="> /dev/null 2>&1"
 role=""
@@ -468,7 +469,6 @@ for arg in $@; do
             assign_role=true
             value=$(echo $value | tr "[:upper:]" "[:lower:]")
             role=$value
-            fi
             ;;
         "--environment" | "-e")
             if [ "$value" != "--environment" ] && [ "$value" != "-e" ]; then
