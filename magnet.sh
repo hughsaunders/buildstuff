@@ -72,7 +72,7 @@ function client_setup(){
    #scp ${SSHOPTS} ~/validation.pem root@$ip:/etc/chef/validation.pem
    #scp ${SSHOPTS} ~/client.rb root@$ip:/etc/chef/client.rb
 
-   knife bootstrap $ip -d chef-full --sudo
+   knife bootstrap $ip -d chef-full --sudo $verbose_string
 }
 
 function wait_for_ip(){
@@ -147,7 +147,7 @@ function steal_swap_for_swift_cinder(){
     ssh $SSHOPTS root@${ip} 'sed -i "/xvdc1/d" /etc/fstab; swapoff /dev/xvdc1; fdisk /dev/xvdc << EOF
 d
 w
-EOF' || true
+EOF' || true ${verbose_string}
 }
 
 function credentials_check(){
@@ -234,15 +234,30 @@ function assignrole(){
     esac
 }
 
+function check_name(){
+    server=$1
+    if ( echo $server | grep "_" ); then
+        echo "The specified name contains an _ this will cause issues, changing to a -"
+        new_server=$( echo $server | tr "_" "-" )
+        INST_NAME=$new_server
+    fi
+}
+
 function set_environ(){
     server=$1
     env=$2
+    count=0
     current_env=$(knife node show $server | grep 'Environment' | cut -d':' -f2|cut -d' ' -f2)
     while [ "${current_env}" != "${env}" ]; do
-        knife exec -E "nodes.transform('name:${server}') { |n| n.chef_environment('${env}'); n.save}"
+        knife exec -E "nodes.transform('name:${server}') { |n| n.chef_environment('${env}'); n.save} $verbose_string"
         current_env=$(knife node show $server | grep 'Environment' | cut -d':' -f2 | cut -d' ' -f2)
         echo "current environment is $current_env"
         sleep 5
+        count=$(( count + 1 ))
+        if [ $count -gt 10 ]; then
+            echo "Unable to set environment"
+            break
+        fi
     done
 }
 
@@ -282,10 +297,10 @@ ARGUMENTS:
          Run a re-index on the chef-server specified by "-s"
   -u= --upload=<Path to cookbooks>
          Upload cookbooks in specified Path
-         Defaults to $PWD/cookbooks
+         Defaults to \$PWD/cookbooks
   -dl= --download=<Path to download>
          Download cookbooks from the rcbops repo and upload them
-         Defaults to $PWD
+         Defaults to \$PWD
   -a= --assign-role=[ full ]
          Assign role
   -e= --environment=<Environment Name>
@@ -326,6 +341,7 @@ reindex=false
 upload=false
 download=false
 server_count=1
+verbose_string="> /dev/null 2>&1"
 role=""
 download_location="$PWD/chef-cookbooks"
 cookbook_location="${PWD}/cookbooks"
@@ -345,7 +361,6 @@ OS_PASSWORD=${OS_PASSWORD:-}
 # Boot String Vars #
 network_string="--nic net-id=00000000-0000-0000-0000-000000000000"
 network_value="chef_net"
-verbose_string=""
 key_location=${HOME}/.ssh/authorized_keys
 SSHOPTS="-q -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
 ####################
@@ -447,7 +462,6 @@ for arg in $@; do
             fi
             ;;
         "--assign" | "-a")
-            new_server=false
             assign_role=true
             value=$(echo $value | tr "[:upper:]" "[:lower:]")
             if [ "$value" == "full" ]; then
@@ -469,7 +483,7 @@ for arg in $@; do
             ;;
         "--verbose" | "-v")
             VERBOSE=1
-            verbose_string="-v"
+            #verbose_string=""
             set -x
             ;;
         "--version" | "-V")
@@ -484,16 +498,23 @@ for arg in $@; do
     esac
 done
 
-credentials_check
 
 if ( $new_server ); then
+    check_name $INST_NAME
+    credentials_check
     check_network
     for client in $(seq 1 $server_count); do
-        TEMP_NAME=$INST_NAME$client
+        TEMP_NAME=$INST_NAME
+        if [ $server_count -ne 1 ]; then
+            TEMP_NAME=$INST_NAME$client
+        fi
         boot_instance $TEMP_NAME
     done
     for client in $(seq 1 $server_count); do
-        TEMP_NAME=$INST_NAME$client
+        TEMP_NAME=$INST_NAME
+        if [ $server_count -ne 1 ]; then
+            TEMP_NAME=$INST_NAME$client
+        fi
         wait_for_server $TEMP_NAME
         steal_swap_for_swift_cinder $TEMP_NAME
         edit_host_file $TEMP_NAME $chef_server
@@ -504,7 +525,10 @@ elif ( $client_run ); then
     clientrun $INST_NAME
 elif ( $client_delete ); then
     for client in $(seq 1 $server_count); do
-        TEMP_NAME=$INST_NAME$client
+        TEMP_NAME=$INST_NAME
+        if [ $server_count -ne 1 ]; then
+            TEMP_NAME=$INST_NAME$client
+        fi
         clientdelete $TEMP_NAME
     done
 elif ( $reindex ); then
