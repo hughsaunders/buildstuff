@@ -237,7 +237,13 @@ function assignrole(){
 function set_environ(){
     server=$1
     env=$2
-    knife exec -E "nodes.transform('name:${server}') { |n| n.chef_environment('${env}'); n.save}"
+    current_env=$(knife node show $server | grep 'Environment' | cut -d':' -f2|cut -d' ' -f2)
+    while [ "${current_env}" != "${env}" ]; do
+        knife exec -E "nodes.transform('name:${server}') { |n| n.chef_environment('${env}'); n.save}"
+        current_env=$(knife node show $server | grep 'Environment' | cut -d':' -f2 | cut -d' ' -f2)
+        echo "current environment is $current_env"
+        sleep 5
+    done
 }
 
 function usage(){
