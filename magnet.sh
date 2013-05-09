@@ -231,6 +231,9 @@ function assignrole(){
           knife node run_list add ${server} ${FULL_RUNLIST}
           clientrun $server
           ;;
+       *)
+          knife node run_list add ${server} ${serverrole}
+          ;;
     esac
 }
 
@@ -464,12 +467,7 @@ for arg in $@; do
         "--assign" | "-a")
             assign_role=true
             value=$(echo $value | tr "[:upper:]" "[:lower:]")
-            if [ "$value" == "full" ]; then
-                role=$value
-            else
-                echo "Please specify suitable role"
-                usage
-                exit 1
+            role=$value
             fi
             ;;
         "--environment" | "-e")
