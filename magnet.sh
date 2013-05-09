@@ -72,7 +72,7 @@ function client_setup(){
    #scp ${SSHOPTS} ~/validation.pem root@$ip:/etc/chef/validation.pem
    #scp ${SSHOPTS} ~/client.rb root@$ip:/etc/chef/client.rb
 
-   knife bootstrap $ip -d chef-full --sudo $verbose_string
+   knife bootstrap $ip -d chef-full --sudo
 }
 
 function wait_for_ip(){
@@ -236,7 +236,7 @@ function assignrole(){
 
 function check_name(){
     server=$1
-    if ( echo $server | grep "_" ); then
+    if ( echo $server | grep -q "_" ); then
         echo "The specified name contains an _ this will cause issues, changing to a -"
         new_server=$( echo $server | tr "_" "-" )
         INST_NAME=$new_server
@@ -254,7 +254,7 @@ function set_environ(){
         echo "current environment is $current_env"
         sleep 5
         count=$(( count + 1 ))
-        if [ $count -gt 10 ]; then
+        if [ $count -gt 20 ]; then
             echo "Unable to set environment"
             break
         fi
@@ -540,7 +540,8 @@ elif ( $download ); then
     download_cookbooks $download_location
     upload_cookbooks "$download_location/cookbooks/"
     setup_roles $download_location
-elif ( $assign_role ); then
+fi
+if ( $assign_role ); then
     assignrole $INST_NAME $role
 fi
 exit
