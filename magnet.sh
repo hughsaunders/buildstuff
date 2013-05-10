@@ -10,7 +10,7 @@ function ip_for(){
     if [[ ${ip} =~ "." ]]; then
         echo ${ip}
     else
-        echo ""
+        echo
     fi
 }
 
@@ -38,6 +38,9 @@ function get_image_type(){
 
 function boot_instance(){
    server_name=$1
+   EMPTY=''
+   server="chefserver"
+   ip_for $server
    imagelist=$($NOVA image-list)
    flavorlist=$($NOVA flavor-list)
 
@@ -276,11 +279,11 @@ function set_environ(){
 function provision_chef_client(){
     server_name="$1"
     knife node show $server_name &>/dev/null && {
-        "Chef node $server_name already exists, Aborting..."
+        echo "Chef node $server_name already exists, Aborting..."
         exit 1
     }
     knife client show $server_name &>/dev/null && {
-        "Chef client $server_name already exists, Aborting..."
+        echo "Chef client $server_name already exists, Aborting..."
         exit 1
     }
     boot_instance $server_name
@@ -334,7 +337,8 @@ ARGUMENTS:
   -a= --assign-role=[ full ]
          Assign role
   -t= --template=
-         Use a template - this creates a group of nodes assigns roles and runs
+         Comma seperated list of templates to use. 
+         Each template creates a group of nodes assigns roles and runs
          chef client on each in the appropriate order. 
 
          Available Templates:
@@ -362,7 +366,7 @@ function template_allinone(){
     clientrun allinone
 }
 
-function template_controller_twocompute(){
+function template_base(){
 
     # Boot and setup chef on each node in parallel
     provision_chef_client "${template_prefix}-controller"&
@@ -381,6 +385,84 @@ function template_controller_twocompute(){
     clientrun "${template_prefix}-compute2"
     clientrun "${template_prefix}-controller"
 }
+
+function template_cinder(){
+    provision_chef_client "${template_prefix}-cinder"&
+    wait
+
+    addrole  "${template_prefix}-cinder" "role[cinder-all]"
+    clientrun  "${template_prefix}-cinder"
+}
+
+function template_swift(){
+    provision_chef_client "${template_prefix}-swiftproxy"&
+    provision_chef_client "${template_prefix}-swiftstore1"&
+    provision_chef_client "${template_prefix}-swiftstore2"&
+    provision_chef_client "${template_prefix}-swiftstore3"&
+    wait
+
+    addrole  "${template_prefix}-swiftproxy" "role[mysql-master], role[keystone], role[swift-management-server], role[swift-proxy]"
+    addrole  "${template_prefix}-swiftstore1" "role[swift-account-server], role[swift-container-server], role[swift-object-server]"
+    addrole  "${template_prefix}-swiftstore2" "role[swift-account-server], role[swift-container-server], role[swift-object-server]"
+    addrole  "${template_prefix}-swiftstore3" "role[swift-account-server], role[swift-container-server], role[swift-object-server]"
+
+    # Swift cookbooks requires two runs of management then store nodes.
+    clientrun "${template_prefix}-swiftproxy"
+    clientrun "${template_prefix}-swiftstore1"
+    clientrun "${template_prefix}-swiftstore2"
+    clientrun "${template_prefix}-swiftstore3"
+
+    clientrun "${template_prefix}-swiftproxy"
+    clientrun "${template_prefix}-swiftstore1"
+    clientrun "${template_prefix}-swiftstore2"
+    clientrun "${template_prefix}-swiftstore3"
+
+}
+
+#copy of the smaller templates.
+function template_full(){
+
+    provision_chef_client "${template_prefix}-controller"&
+    provision_chef_client "${template_prefix}-compute1"&
+    provision_chef_client "${template_prefix}-compute2"&
+    provision_chef_client "${template_prefix}-cinder"&
+    provision_chef_client "${template_prefix}-swiftproxy"&
+    provision_chef_client "${template_prefix}-swiftstore1"&
+    provision_chef_client "${template_prefix}-swiftstore2"&
+    provision_chef_client "${template_prefix}-swiftstore3"&
+    wait
+
+    addrole  "${template_prefix}-cinder" "role[cinder-all]"
+    
+    addrole  "${template_prefix}-controller" "role[single-controller]"
+    addrole  "${template_prefix}-compute1" "role[single-compute]"
+    addrole  "${template_prefix}-compute2" "role[single-compute]"
+
+    addrole  "${template_prefix}-swiftproxy" "role[mysql-master], role[keystone], role[swift-management-server], role[swift-proxy]"
+    addrole  "${template_prefix}-swiftstore1" "role[swift-account-server], role[swift-container-server], role[swift-object-server]"
+    addrole  "${template_prefix}-swiftstore2" "role[swift-account-server], role[swift-container-server], role[swift-object-server]"
+    addrole  "${template_prefix}-swiftstore3" "role[swift-account-server], role[swift-container-server], role[swift-object-server]"
+
+    clientrun "${template_prefix}-controller"
+    clientrun "${template_prefix}-compute1"
+    clientrun "${template_prefix}-compute2"
+    clientrun "${template_prefix}-controller"
+
+    # Swift cookbooks requires two runs of management then store nodes.
+    clientrun "${template_prefix}-swiftproxy"
+    clientrun "${template_prefix}-swiftstore1"
+    clientrun "${template_prefix}-swiftstore2"
+    clientrun "${template_prefix}-swiftstore3"
+
+    clientrun "${template_prefix}-swiftproxy"
+    clientrun "${template_prefix}-swiftstore1"
+    clientrun "${template_prefix}-swiftstore2"
+    clientrun "${template_prefix}-swiftstore3"
+    
+    clientrun  "${template_prefix}-cinder"
+}
+
+
 ######################
 
 ####################
@@ -543,7 +625,7 @@ for arg in $@; do
             fi
             ;;
         "--template " | "-t")
-            template_name="$value"
+            template_list="$value"
             use_template=true
             ;;
         "--template-prefix" | "-tp")
@@ -582,9 +664,12 @@ check_network
 
 if ( $use_template ); then
     # Get rid of anything suspicous before eval.
-    echo "Using template: $template_name"
-    template_name=$(tr -dc 'a-z_-' <<<$template_name)
-    eval "template_${template_name}"
+    template_list=$(tr -dc 'a-z_,-' <<<$template_list)
+    IFS=','
+    for template in $template_list; do
+        unset IFS
+        eval "template_${template}"
+    done
     exit
 elif ( $new_server ); then
     for client in $(seq 1 $server_count); do
