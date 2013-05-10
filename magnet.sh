@@ -4,7 +4,9 @@ set -u
 
 function ip_for(){
     server=$1
-    ip=$($NOVA show ${server} | sed -En "/public network/ s/^.* ([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}).*$/\1/p")
+    details=$($NOVA show ${server})
+    grep -q $server <<<$details #exit due to set -e if server doesn't exist
+    ip=$(sed -En "/public network/ s/^.* ([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}).*$/\1/p" <<<$details)
     if [[ ${ip} =~ "." ]]; then
         echo ${ip}
     else
@@ -38,6 +40,8 @@ function boot_instance(){
    server_name=$1
    imagelist=$($NOVA image-list)
    flavorlist=$($NOVA flavor-list)
+
+   check_name $server_name
 
    image=$(echo "${imagelist}" | grep "${IMAGE_TYPE}" | head -n1 | awk '{ print $2 }')
    flavor=$(echo "${flavorlist}" | grep "${FLAVOR_TYPE}" | head -n1 | awk '{ print $2 }')
@@ -261,6 +265,16 @@ function set_environ(){
     done
 }
 
+function provision_chef_client(){
+    server_name="$1"
+    boot_instance $server_name
+    wait_for_server $server_name
+    steal_swap_for_swift_cinder $server_name
+    edit_host_file $server_name $chef_server
+    client_setup $server_name
+    set_environ $server_name $environment
+}
+
 function usage(){
 cat <<EOF
 usage: $0 options
@@ -303,6 +317,11 @@ ARGUMENTS:
          Defaults to \$PWD
   -a= --assign-role=[ full ]
          Assign role
+  -t= --template=
+         Use a template - this creates a group of nodes assigns roles and runs
+         chef client on each in the appropriate order. 
+  -tp --template-prefix=
+         Specify a name prefix for each node created by a template.
   -e= --environment=<Environment Name>
          Specify the environment, defaults to test
 EOF
@@ -313,6 +332,26 @@ cat <<EOF
 $0 (version: $VERSION)
 EOF
 }
+
+
+######################
+# Template Functions #
+function template_allinone(){
+    provision_chef_client "${template_prefix}-allinone"
+    clientrun allinone
+}
+
+function template_controller_twocompute(){
+    provision_chef_client "${template_prefix}-controller"&
+    provision_chef_client "${template_prefix}-compute1"&
+    provision_chef_client "${template_prefix}-compute2"&
+    wait
+    clientrun "${template_prefix}-controller"
+    clientrun "${template_prefix}-compute1"
+    clientrun "${template_prefix}-compute2"
+    clientrun "${template_prefix}-controller"
+}
+######################
 
 ####################
 # Global Variables #
@@ -335,6 +374,7 @@ FLAVOR_TYPE=${FLAVOR_TYPE:-"4GB"}
 INST_NAME="chef-client"
 chef_server="chef-server"
 new_server=true
+use_template=false
 client_run=false
 client_delete=false
 reindex=false
@@ -472,6 +512,13 @@ for arg in $@; do
                 exit 1
             fi
             ;;
+        "--template " | "-t")
+            template_name="$value"
+            use_template=true
+            ;;
+        "--template-prefix" | "-tp")
+            template_prefix=${value:-"magnet"}
+            ;;
         "--environment" | "-e")
             if [ "$value" != "--environment" ] && [ "$value" != "-e" ]; then
                 environment=$value
@@ -498,28 +545,24 @@ for arg in $@; do
     esac
 done
 
+# Initial Checks
+credentials_check
+ip_for $chef_server >/dev/null #check chef server exists.
+check_network
 
-if ( $new_server ); then
-    check_name $INST_NAME
-    credentials_check
-    check_network
+if ( $use_template ); then
+    # Get rid of anything suspicous before eval.
+    echo "Using template: $template_name"
+    template_name=$(tr -dc 'a-z_-' <<<$template_name)
+    eval "template_${template_name}"
+    exit
+elif ( $new_server ); then
     for client in $(seq 1 $server_count); do
         TEMP_NAME=$INST_NAME
         if [ $server_count -ne 1 ]; then
             TEMP_NAME=$INST_NAME$client
         fi
-        boot_instance $TEMP_NAME
-    done
-    for client in $(seq 1 $server_count); do
-        TEMP_NAME=$INST_NAME
-        if [ $server_count -ne 1 ]; then
-            TEMP_NAME=$INST_NAME$client
-        fi
-        wait_for_server $TEMP_NAME
-        steal_swap_for_swift_cinder $TEMP_NAME
-        edit_host_file $TEMP_NAME $chef_server
-        client_setup $TEMP_NAME
-        set_environ $TEMP_NAME $environment
+        provision_chef_client $TEMP_NAME
     done
 elif ( $client_run ); then
     clientrun $INST_NAME
