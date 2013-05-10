@@ -6,7 +6,7 @@ function ip_for(){
     server=$1
     details=$($NOVA show ${server})
     grep -q $server <<<$details #exit due to set -e if server doesn't exist
-    ip=$(sed -En "/public network/ s/^.* ([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}).*$/\1/p" <<<$details)
+    ip=$(sed -En "/accessIPv4/ s/^.* ([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}).*$/\1/p" <<<$details)
     if [[ ${ip} =~ "." ]]; then
         echo ${ip}
     else
@@ -40,7 +40,6 @@ function boot_instance(){
    server_name=$1
    EMPTY=''
    server="chefserver"
-   ip_for $server
    imagelist=$($NOVA image-list)
    flavorlist=$($NOVA flavor-list)
 
@@ -79,6 +78,7 @@ function client_setup(){
    #scp ${SSHOPTS} ~/validation.pem root@$ip:/etc/chef/validation.pem
    #scp ${SSHOPTS} ~/client.rb root@$ip:/etc/chef/client.rb
 
+   echo "Installing chef-client on $server"
    knife bootstrap $ip -d chef-full --sudo
 }
 
@@ -125,7 +125,7 @@ function wait_for_server(){
    while ( ! ping -c1 ${ip} > /dev/null 2>&1 ); do
        count=$(( count + 1 ))
        if [ ${count} -gt ${max_ping} ]; then
-           echo "timeout waiting for ping"
+           echo "timeout waiting for ping $server / $ip"
            exit 1
        fi
        sleep 10
