@@ -227,6 +227,7 @@ function download_cookbooks(){
     git clone --recursive -b sprint http://github.com/rcbops/chef-cookbooks $1
 }
 
+# Adds predefined sets of roles.
 function assignrole(){
     server=$1
     serverrole=$2
@@ -236,6 +237,13 @@ function assignrole(){
           clientrun $server
           ;;
     esac
+}
+
+# Add role via free text.
+function addrole(){
+    server=$1
+    serverrole=$2
+    knife node run_list add ${server} ${serverrole}
 }
 
 function check_name(){
@@ -267,6 +275,14 @@ function set_environ(){
 
 function provision_chef_client(){
     server_name="$1"
+    knife node show $server_name &>/dev/null && {
+        "Chef node $server_name already exists, Aborting..."
+        exit 1
+    }
+    knife client show $server_name &>/dev/null && {
+        "Chef client $server_name already exists, Aborting..."
+        exit 1
+    }
     boot_instance $server_name
     wait_for_server $server_name
     steal_swap_for_swift_cinder $server_name
@@ -320,6 +336,10 @@ ARGUMENTS:
   -t= --template=
          Use a template - this creates a group of nodes assigns roles and runs
          chef client on each in the appropriate order. 
+
+         Available Templates:
+            * All in one: One node with the allinone role. 
+            * controller_twocompute: One controller node, two compute nodes.
   -tp --template-prefix=
          Specify a name prefix for each node created by a template.
   -e= --environment=<Environment Name>
@@ -338,14 +358,24 @@ EOF
 # Template Functions #
 function template_allinone(){
     provision_chef_client "${template_prefix}-allinone"
+    addrole  "${template_prefix}-allinone" "role[allinone]"
     clientrun allinone
 }
 
 function template_controller_twocompute(){
+
+    # Boot and setup chef on each node in parallel
     provision_chef_client "${template_prefix}-controller"&
     provision_chef_client "${template_prefix}-compute1"&
     provision_chef_client "${template_prefix}-compute2"&
     wait
+
+    # Assign the roles
+    addrole  "${template_prefix}-controller" "role[single-controller]"
+    addrole  "${template_prefix}-compute1" "role[single-compute]"
+    addrole  "${template_prefix}-compute2" "role[single-compute]"
+
+    # Run chef-client in the correct order
     clientrun "${template_prefix}-controller"
     clientrun "${template_prefix}-compute1"
     clientrun "${template_prefix}-compute2"
