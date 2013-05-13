@@ -6,11 +6,13 @@ function ip_for(){
     server=$1
     details=$($NOVA show ${server})
     grep -q $server <<<$details #exit due to set -e if server doesn't exist
-    ip=$(sed -En "/accessIPv4/ s/^.* ([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}).*$/\1/p" <<<$details)
+    ip=$(sed -En "/accessIPv4/s/^.* ([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}).*$/\1/p" <<<$details)
     if [[ ${ip} =~ "." ]]; then
         echo ${ip}
+        return 0
     else
-        echo
+        echo ""
+        return 1
     fi
 }
 
@@ -401,7 +403,7 @@ function template_swift(){
     provision_chef_client "${template_prefix}-swiftstore3"&
     wait
 
-    addrole  "${template_prefix}-swiftproxy" "role[mysql-master], role[keystone], role[swift-management-server], role[swift-proxy]"
+    addrole  "${template_prefix}-swiftproxy" "role[mysql-master], role[keystone], role[swift-management-server], role[swift-proxy-server]"
     addrole  "${template_prefix}-swiftstore1" "role[swift-account-server], role[swift-container-server], role[swift-object-server]"
     addrole  "${template_prefix}-swiftstore2" "role[swift-account-server], role[swift-container-server], role[swift-object-server]"
     addrole  "${template_prefix}-swiftstore3" "role[swift-account-server], role[swift-container-server], role[swift-object-server]"
@@ -438,7 +440,7 @@ function template_full(){
     addrole  "${template_prefix}-compute1" "role[single-compute]"
     addrole  "${template_prefix}-compute2" "role[single-compute]"
 
-    addrole  "${template_prefix}-swiftproxy" "role[mysql-master], role[keystone], role[swift-management-server], role[swift-proxy]"
+    addrole  "${template_prefix}-swiftproxy" "role[mysql-master], role[keystone], role[swift-management-server], role[swift-proxy-server]"
     addrole  "${template_prefix}-swiftstore1" "role[swift-account-server], role[swift-container-server], role[swift-object-server]"
     addrole  "${template_prefix}-swiftstore2" "role[swift-account-server], role[swift-container-server], role[swift-object-server]"
     addrole  "${template_prefix}-swiftstore3" "role[swift-account-server], role[swift-container-server], role[swift-object-server]"
