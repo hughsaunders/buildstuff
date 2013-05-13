@@ -11,12 +11,14 @@ from cliff.command import Command
 import chef
 import pyrax
 
+
+
 log = logging.getLogger(__name__)
 log.debug('test log message')
 
 class InstanceManager(object):
     def __init__(self):
-        self.action_lists=collections.defaultdict(list)
+        self.action_lists = collections.defaultdict(list)
 
     def execute(self, action, *args, **kwargs):
        for action in self.action_lists[action]:
@@ -25,42 +27,41 @@ class InstanceManager(object):
 
 class NovaConnector(object):
 
-    def __init__(self):
+    def __init__(self, app):
+        self.app = app
         self.cs = pyrax.cloudservers
         self.cnw = pyrax.cloud_networks
 
-    def find_image(self, name):
-        images = [img for img in self.cs.images.list() 
-                if name.lower in img.name.lower()]
-        if images:
-            return images[0]
-        return []
+    def find_image(self, idorname):
+        for image in self.cs.images.list():
+            if (str(image.id) == str(idorname) or
+                        idorname.lower() in image.name.lower()):
+                return image
+        raise ValueError('No image found for %s' %idorname)
 
     def find_network(self, idorname):
-        network_list = self.cnw.list()
-        for network in network_list:
+        for network in self.cnw.list():
             if (network.id == idorname or
                     idorname.lower() in network.label.lower()):
                 return network
-        raise ValueError('No network matching %s found' %idorname)
+        raise ValueError('No network matching %s found' % idorname)
 
     def create(self, *args, **kwargs):
         parsed_args = kwargs['parsed_args']
-        app=kwargs['app']
 
-        create_kwargs={}
-        if network in app.options:
-            create_kwargs['nics'] = app.options.network
+        create_kwargs = {}
+        if 'network' in self.app.options:
+            create_kwargs['nics'] = self.find_network(self.app.options.network)
+
+        create_kwargs['files'] = {
+            '/root/.ssh/authorized_keys': open(parsed_args.sshpubkey)
+        }
+
         self.cs.create(
             parsed_args.name,
             self.find_image(parsed_args.imagename),
             parsed_args.flavorid,
-            files = {
-                '/root/.ssh/authorized_keys': open(parsed_args.sshpubkey)
-            }
-            networks[{
-                'net-id': 
-                }]
+            **create_kwargs
         )
 
     def delete(self):
@@ -68,6 +69,21 @@ class NovaConnector(object):
             if server.name.startswith(self.app.options.prefix):
                 log.info('Deleting Nova instance: %s' %server.name)
                 server.delete()
+
+class DNSConnector(object):
+    def __init__(self, app):
+        self.app = app
+        self.domain = pyrax.cloud_dns.find(name=self.options.dnsdomain)
+
+    def create(self, parsed_args):
+        name = kwargs['name']
+        type = kwargs.get('record_type','A')
+
+        self.domain.add_records([{
+            'type': type,
+            'name': name,
+            'data': data
+        }])
 
 class CLIActionDelete(Command):
     def take_action(self,parsed_args):
@@ -92,7 +108,7 @@ class CLIActionDelete(Command):
                 log.info('Removing chef node: %s' % node.object.name)
                 node.object.delete()
 
-        # Delete chef clients. Code structure is dffierent as there is no 
+        # Delete chef clients. Code structure is dffierent as there is no
         # ApiClient subclass of ChefObject in pychef
         for client in chef.Search('client'):
             name=client['name']
@@ -119,7 +135,7 @@ class CLIActionBoot(Command):
 
 class ClusterTemplate(object):
     # list of servers required by this template
-    servers = [] 
+    servers = []
 
     # Ordered list of chef client runs required by this template
     chef_client_runs = []
