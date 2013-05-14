@@ -3,6 +3,7 @@ import collections
 import logging
 import os
 import sys
+import subprocess
 
 from cliff.app import App
 from cliff.commandmanager import CommandManager
@@ -10,27 +11,66 @@ from cliff.command import Command
 
 import chef
 import pyrax
+import spur
 
 
 
 log = logging.getLogger(__name__)
-log.debug('test log message')
 
-class InstanceManager(object):
-    def __init__(self):
-        self.action_lists = collections.defaultdict(list)
+class Instance(object):
 
-    def execute(self, action, *args, **kwargs):
-       for action in self.action_lists[action]:
-           action(*args, **kwargs)
-
-
-class NovaConnector(object):
-
-    def __init__(self, app):
+    def __init__(self, name, app, parsed_args):
         self.app = app
+        self.name = name
+        self.parsed_args = parsed_args
         self.cs = pyrax.cloudservers
         self.cnw = pyrax.cloud_networks
+        self._instance = self.find_instance(self.name)
+
+    def find_instance(self, name):
+        for instance in self.cs.list():
+            if name.lower() == instance.name.lower():
+                return instance
+
+    def check_health(self):
+        if self._instance.status == 'ERROR':
+            return False
+        if self._instance.status in ['BUILDING','SPAWNING']:
+            pyrax.utils.wait_until(
+                self._instance, 
+                'status', 
+                ['ACTIVE','ERROR'],
+                attempts=60
+            )
+            if self._instance.status != 'ACTIVE':
+                return False
+        if not self.ping():
+            return False
+        return self.ssh_ping()
+
+        
+    def ssh_ping(self):
+        try:
+            result = spur.SshShell(
+                    hostname=self._instance.accessIPv4,
+                    username='root'
+            ).run(['hostname'])
+            if (result.return_code == 0 and
+                    result.output.strip().split('.')[0] == self.name):
+                return True
+        except Exception, e:
+            log.error('SSH ping for %s/%s failed %s' % (
+                self._instance.name,
+                self._instance.accessIPv4,
+                e
+            ))
+
+    def ping(self):
+        if not hasattr(self._instance, 'accessIPv4'):
+            return False
+        return subprocess.Popen(
+                ["/usr/bin/env", "ping", "-c1", self._instance.accessIPv4]
+        ).wait() == 0
 
     def find_image(self, idorname):
         for image in self.cs.images.list():
